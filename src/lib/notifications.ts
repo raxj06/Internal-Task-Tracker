@@ -29,6 +29,7 @@ interface NotificationPayload {
     sender?: {
         id: string
         full_name: string
+        email?: string
     }
     org_name?: string
     extra?: Record<string, unknown>

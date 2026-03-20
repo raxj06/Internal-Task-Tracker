@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { sendNotification } from '@/lib/notifications'
+import { calculateReminderSchedule } from '@/lib/reminders'
 
 // ── Create Task ──────────────────────────────────────────────
 export async function createTask(formData: FormData) {
@@ -13,7 +14,7 @@ export async function createTask(formData: FormData) {
 
     const { data: profile } = await supabase
         .from('users')
-        .select('org_id, full_name')
+        .select('org_id, full_name, email')
         .eq('id', user.id)
         .single()
 
@@ -25,17 +26,21 @@ export async function createTask(formData: FormData) {
     const due_date = formData.get('due_date') as string
     const assignee_id = formData.get('assignee_id') as string
 
+    const due_date_iso = due_date ? new Date(due_date).toISOString() : null
+    const reminder_schedule = due_date_iso ? calculateReminderSchedule(due_date_iso) : null
+
     const { data: newTask, error } = await supabase
         .from('tasks')
         .insert([{
             title,
             description,
             priority,
-            due_date: due_date ? new Date(due_date).toISOString() : null,
+            due_date: due_date_iso,
+            reminder_schedule,
             assignee_id,
             creator_id: user.id,
             org_id: profile.org_id,
-            status: 'Pending Acceptance'
+            status: assignee_id === user.id ? 'Not Started' : 'Pending Acceptance'
         }])
         .select('id')
         .single()
@@ -58,7 +63,7 @@ export async function createTask(formData: FormData) {
                 type: 'task_created',
                 task: { id: newTask.id, title, description, priority, due_date },
                 recipient: assignee,
-                sender: { id: user.id, full_name: profile.full_name },
+                sender: { id: user.id, full_name: profile.full_name, email: profile.email },
             })
         }
     }
@@ -102,7 +107,7 @@ export async function updateTaskStatus(taskId: string, newStatus: string) {
 
             const { data: changer } = await supabase
                 .from('users')
-                .select('id, full_name')
+                .select('id, full_name, email')
                 .eq('id', user.id)
                 .single()
 
@@ -111,7 +116,7 @@ export async function updateTaskStatus(taskId: string, newStatus: string) {
                     type: newStatus === 'Blocked' ? 'task_blocked' : 'task_completed',
                     task,
                     recipient: creator,
-                    sender: changer ? { id: changer.id, full_name: changer.full_name } : undefined,
+                    sender: changer ? { id: changer.id, full_name: changer.full_name, email: changer.email } : undefined,
                 })
             }
         }
@@ -164,7 +169,7 @@ export async function respondToTask(taskId: string, accept: boolean, reason?: st
 
         const { data: responder } = await supabase
             .from('users')
-            .select('id, full_name')
+            .select('id, full_name, email')
             .eq('id', user.id)
             .single()
 
@@ -173,7 +178,7 @@ export async function respondToTask(taskId: string, accept: boolean, reason?: st
                 type: accept ? 'task_accepted' : 'task_rejected',
                 task: { ...task, rejection_reason: reason },
                 recipient: creator,
-                sender: responder ? { id: responder.id, full_name: responder.full_name } : undefined,
+                sender: responder ? { id: responder.id, full_name: responder.full_name, email: responder.email } : undefined,
             })
         }
     }
