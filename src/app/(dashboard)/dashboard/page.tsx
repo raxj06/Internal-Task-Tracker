@@ -39,19 +39,25 @@ async function fetchTasksAssignedTo(userId: string) {
 
 async function fetchDeptTasks(orgId: string, department: string) {
     const supabase = await createClient()
-    // We need to find tasks where EITHER creator OR assignee is in the department
-    // Since department is on the user profile, we use a join-like filter
+
+    // Step 1: Get all user IDs in this department
+    const { data: deptUsers } = await supabase
+        .from('users')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('department', department)
+
+    const deptUserIds = (deptUsers || []).map((u: any) => u.id)
+    if (deptUserIds.length === 0) return []
+
+    // Step 2: Get tasks where assignee OR creator is in the department
     const { data } = await supabase
         .from('tasks')
-        .select(`
-            id, title, description, priority, status, due_date, rejection_reason, assignee_id, creator_id,
-            assignee:assignee_id(full_name, department),
-            creator:creator_id(full_name, department)
-        `)
+        .select(`id, title, description, priority, status, due_date, rejection_reason, assignee_id, creator_id, assignee:assignee_id(full_name), creator:creator_id(full_name)`)
         .eq('org_id', orgId)
-        .or(`assignee.department.eq."${department}",creator.department.eq."${department}"`)
+        .or(`assignee_id.in.(${deptUserIds.join(',')}),creator_id.in.(${deptUserIds.join(',')})`)
         .order('created_at', { ascending: false })
-    
+
     return (data || []) as any[]
 }
 
@@ -76,9 +82,16 @@ export default async function DashboardPage() {
     const showOrgOverview = role === 'Founder' || role === 'Admin'
     const isManager = role === 'Manager'
 
-    const rawTasksGiven = showOrgOverview 
-        ? await fetchOrgTasks(profile.org_id)
-        : await fetchTasksCreatedBy(user.id)
+    // Tasks Given: Org-wide for Founders/Admins, Dept-wide for Managers, Self-created for others
+    let rawTasksGiven: any[] = []
+    if (showOrgOverview) {
+        rawTasksGiven = await fetchOrgTasks(profile.org_id)
+    } else if (isManager && profile.department) {
+        // Managers see ALL tasks in their department (includes employee self-tasks)
+        rawTasksGiven = await fetchDeptTasks(profile.org_id, profile.department)
+    } else {
+        rawTasksGiven = await fetchTasksCreatedBy(user.id)
+    }
     
     const rawTasksAssigned = await fetchTasksAssignedTo(user.id)
 
@@ -88,6 +101,11 @@ export default async function DashboardPage() {
 
     const activeTasksGiven = rawTasksGiven.filter(isActive)
     const activeTasksAssigned = rawTasksAssigned.filter(isActive)
+
+    // For employees: My Tasks shows tasks where they are creator OR assignee (merged + deduped)
+    const activeTasksEmployee = [...rawTasksGiven, ...rawTasksAssigned]
+        .filter(isActive)
+        .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
     
     // 📂 HISTORY FILTERING LOGIC
     let historyTasks: any[] = []
@@ -110,25 +128,62 @@ export default async function DashboardPage() {
 
     const allHistory = historyTasks // Renaming for clarity in the JSX below
 
-    // Subordinates: Managers/Admins/Founders see the org, Employees only see themselves
-    let subordinates: any[] = []
+    // ── SUBORDINATES / ASSIGNABLE USERS ────────────────────────
+    let assignableUsers: any[] = []
     
-    if (role === 'Employee') {
-        subordinates = [{
-            id: user.id,
-            full_name: profile.full_name,
-            role: profile.role,
-            department: profile.department
-        }]
-    } else {
-        const { data: subs } = await supabase
+    // 1. Fetch ALL leadership (Founder, Admin, Manager) across the entire org
+    const { data: leadership } = await supabase
+        .from('users')
+        .select('id, full_name, role, department')
+        .eq('org_id', profile.org_id)
+        .in('role', ['Founder', 'Admin', 'Manager'])
+        .order('full_name')
+
+    // 2. Fetch Employees
+    if (showOrgOverview) {
+        // Founders/Admins can see ALL employees too
+        const { data: employees } = await supabase
             .from('users')
             .select('id, full_name, role, department')
             .eq('org_id', profile.org_id)
-            .in('role', ['Manager', 'Employee'])
-            .neq('id', user.id)
+            .eq('role', 'Employee')
             .order('full_name')
-        subordinates = subs || []
+        
+        assignableUsers = [...(leadership || []), ...(employees || [])]
+    } else if (role === 'Manager') {
+        // Managers see all leadership + employees in their OWN department
+        const { data: deptEmployees } = await supabase
+            .from('users')
+            .select('id, full_name, role, department')
+            .eq('org_id', profile.org_id)
+            .eq('role', 'Employee')
+            .eq('department', profile.department)
+            .order('full_name')
+        
+        assignableUsers = [...(leadership || []), ...(deptEmployees || [])]
+    } else {
+        // Employees see all leadership + only THEMSELVES (no peer employees)
+        assignableUsers = [...(leadership || [])]
+    }
+
+    // Standardize and ensure current user is present
+    assignableUsers = assignableUsers.map(u => ({
+        ...u,
+        display_name: `${u.full_name} (${u.role})${u.id === user.id ? ' (You)' : ''}`
+    }))
+
+    // Removal of potential duplicates (though the specific queries should prevent them)
+    assignableUsers = assignableUsers.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+
+    // Ensure current user is present if for some reason they weren't fetched (fallback)
+    if (!assignableUsers.find(u => u.id === user.id)) {
+        assignableUsers.unshift({
+            id: user.id,
+            full_name: profile.full_name,
+            role: profile.role,
+            department: profile.department,
+            display_name: `${profile.full_name} (${profile.role}) (You)`
+        })
     }
 
     return (
@@ -140,44 +195,66 @@ export default async function DashboardPage() {
                 <AnalyticsChart />
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-10">
-                {/* Left: Tasks Given / Org Overview */}
+            {role === 'Employee' ? (
+                // ── Employee View: Single column — Assigned to Me only ──
                 <div className="space-y-6">
                     <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm shadow-slate-200/50">
                         <div>
-                            <h2 className="text-xl font-bold text-[var(--primary)] tracking-tight">
-                                {showOrgOverview ? 'Organization Overview' : 'Tasks Given'}
-                            </h2>
-                            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mt-0.5">Active Tasks</p>
+                            <h2 className="text-xl font-bold text-[var(--primary)] tracking-tight">My Tasks</h2>
+                            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mt-0.5">Assigned to Me</p>
                         </div>
                         <div className="flex items-center gap-3">
-                            <ExportButton tasks={rawTasksGiven} filename={showOrgOverview ? 'org-tasks-overview.csv' : 'my-tasks-given.csv'} />
-                            <CreateTaskButton subordinates={subordinates} />
+                            <ExportButton tasks={rawTasksAssigned} filename="my-tasks.csv" />
+                            <CreateTaskButton subordinates={assignableUsers} isEmployee={true} />
                         </div>
                     </div>
                     <TaskListClient
-                        tasks={activeTasksGiven}
-                        isAssignee={false}
-                        emptyMessage={showOrgOverview ? "No active tasks in the organization." : "No active tasks created by you."}
-                    />
-                </div>
-
-                {/* Right: Assigned to Me */}
-                <div className="space-y-6">
-                    <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm shadow-slate-200/50">
-                        <div>
-                            <h2 className="text-xl font-bold text-[var(--primary)] tracking-tight">Assigned to Me</h2>
-                            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mt-0.5">Focus List</p>
-                        </div>
-                        <ExportButton tasks={rawTasksAssigned} filename="my-assigned-tasks.csv" />
-                    </div>
-                    <TaskListClient
-                        tasks={activeTasksAssigned}
+                        tasks={activeTasksEmployee}
                         isAssignee={true}
-                        emptyMessage="You have no incoming active tasks."
+                        emptyMessage="You have no active tasks. Use '+ New Task' to log your work."
                     />
                 </div>
-            </div>
+            ) : (
+                // ── Manager / Admin / Founder View: Two-column layout ──
+                <div className="grid lg:grid-cols-2 gap-10">
+                    {/* Left: Tasks Given / Org Overview */}
+                    <div className="space-y-6">
+                        <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm shadow-slate-200/50">
+                            <div>
+                                <h2 className="text-xl font-bold text-[var(--primary)] tracking-tight">
+                                    {showOrgOverview ? 'Organization Overview' : 'Tasks Given'}
+                                </h2>
+                                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mt-0.5">Active Tasks</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <ExportButton tasks={rawTasksGiven} filename={showOrgOverview ? 'org-tasks-overview.csv' : 'my-tasks-given.csv'} />
+                                <CreateTaskButton subordinates={assignableUsers} />
+                            </div>
+                        </div>
+                        <TaskListClient
+                            tasks={activeTasksGiven}
+                            isAssignee={false}
+                            emptyMessage={showOrgOverview ? "No active tasks in the organization." : "No active tasks created by you."}
+                        />
+                    </div>
+
+                    {/* Right: Assigned to Me */}
+                    <div className="space-y-6">
+                        <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm shadow-slate-200/50">
+                            <div>
+                                <h2 className="text-xl font-bold text-[var(--primary)] tracking-tight">Assigned to Me</h2>
+                                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mt-0.5">Focus List</p>
+                            </div>
+                            <ExportButton tasks={rawTasksAssigned} filename="my-assigned-tasks.csv" />
+                        </div>
+                        <TaskListClient
+                            tasks={activeTasksAssigned}
+                            isAssignee={true}
+                            emptyMessage="You have no incoming active tasks."
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* Task History Section */}
             <div className="pt-10 border-t border-slate-100">

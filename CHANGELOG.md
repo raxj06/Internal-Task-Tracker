@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 - **Role-based Privacy**: Restricted Organization Overview to Founders and Admins only.
 - **Task History**: Separated completed/rejected tasks into a dedicated history section with role-based visibility (Employees see personal, Managers see department, Founders see organization).
 - **CSV Export**: Added ability to download task lists for reporting and analysis.
+- **Hierarchical Assignments**: Restricted Employees from assigning to peers; enabled all users to assign to any Manager/Founder/Admin across the organization.
 
 ### Changed
 - Refactored `createTask` to automatically populate reminder schedules.

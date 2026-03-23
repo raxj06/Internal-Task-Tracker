@@ -8,17 +8,28 @@ type UserProfile = {
     full_name: string
     role: string
     department: string | null
+    display_name: string
 }
 
-export default function NewTaskModal({ subordinates, onClose }: { subordinates: UserProfile[], onClose: () => void }) {
+export default function NewTaskModal({
+    subordinates,
+    onClose,
+    isEmployee = false
+}: {
+    subordinates: UserProfile[]
+    onClose: () => void
+    isEmployee?: boolean
+}) {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [selectedPriority, setSelectedPriority] = useState('Medium')
     const formRef = useRef<HTMLFormElement>(null)
 
     async function handleSubmit(formData: FormData) {
         setIsSubmitting(true)
-        // Add priority manually since we're using custom chips
         formData.set('priority', selectedPriority)
+        if (isEmployee) {
+            formData.set('is_self_task', 'true')
+        }
         await createTask(formData)
         setIsSubmitting(false)
         onClose()
@@ -36,11 +47,17 @@ export default function NewTaskModal({ subordinates, onClose }: { subordinates: 
                 {/* Header */}
                 <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                     <div>
-                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">Create New Task</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Fill in the details to assign a new follow-up.</p>
+                        <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+                            {isEmployee ? 'Log My Task' : 'Create New Task'}
+                        </h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                            {isEmployee
+                                ? 'Log a task you are working on and select who assigned it to you.'
+                                : 'Fill in the details to assign a new follow-up.'}
+                        </p>
                     </div>
-                    <button 
-                        onClick={onClose} 
+                    <button
+                        onClick={onClose}
                         className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-all"
                     >
                         <X size={20} />
@@ -50,9 +67,7 @@ export default function NewTaskModal({ subordinates, onClose }: { subordinates: 
                 <form ref={formRef} action={handleSubmit} className="p-6 space-y-5">
                     {/* Title */}
                     <div className="space-y-1.5">
-                        <label className="text-[13px] font-semibold text-slate-700 flex items-center gap-2" htmlFor="title">
-                            Task Title
-                        </label>
+                        <label className="text-[13px] font-semibold text-slate-700" htmlFor="title">Task Title</label>
                         <input
                             id="title" name="title" type="text"
                             placeholder="e.g. Review Q3 Sales Report"
@@ -63,35 +78,33 @@ export default function NewTaskModal({ subordinates, onClose }: { subordinates: 
 
                     {/* Description */}
                     <div className="space-y-1.5">
-                        <label className="text-[13px] font-semibold text-slate-700 flex items-center gap-2" htmlFor="description">
-                            Description
-                        </label>
-                        <div className="relative">
-                            <textarea
-                                id="description" name="description"
-                                placeholder="Provide details about the task..."
-                                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/30 focus:bg-white focus:border-[var(--cta)] focus:ring-4 focus:ring-[var(--cta)]/5 transition-all outline-none text-sm h-28 resize-none leading-relaxed"
-                            />
-                        </div>
+                        <label className="text-[13px] font-semibold text-slate-700" htmlFor="description">Description</label>
+                        <textarea
+                            id="description" name="description"
+                            placeholder="Provide details about the task..."
+                            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50/30 focus:bg-white focus:border-[var(--cta)] focus:ring-4 focus:ring-[var(--cta)]/5 transition-all outline-none text-sm h-28 resize-none leading-relaxed"
+                        />
                     </div>
 
-                    {/* Assignee & Due Date Row */}
+                    {/* Assignee/Given By & Due Date Row */}
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
-                            <label className="text-[13px] font-semibold text-slate-700 flex items-center gap-2" htmlFor="assignee_id">
-                                Assignee
+                            <label className="text-[13px] font-semibold text-slate-700" htmlFor={isEmployee ? 'given_by_id' : 'assignee_id'}>
+                                {isEmployee ? 'Task Given By' : 'Assignee'}
                             </label>
                             <div className="relative">
-                                <select 
-                                    id="assignee_id" 
-                                    name="assignee_id" 
+                                <select
+                                    id={isEmployee ? 'given_by_id' : 'assignee_id'}
+                                    name={isEmployee ? 'given_by_id' : 'assignee_id'}
                                     className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-200 bg-slate-50/30 focus:bg-white focus:border-[var(--cta)] focus:ring-4 focus:ring-[var(--cta)]/5 transition-all outline-none text-sm appearance-none"
                                     required
                                 >
-                                    <option value="">Select member...</option>
+                                    <option value="">
+                                        {isEmployee ? 'Select manager...' : 'Select member...'}
+                                    </option>
                                     {subordinates.map(sub => (
                                         <option key={sub.id} value={sub.id}>
-                                            {sub.full_name}
+                                            {sub.display_name}
                                         </option>
                                     ))}
                                 </select>
@@ -99,12 +112,13 @@ export default function NewTaskModal({ subordinates, onClose }: { subordinates: 
                                     <User size={16} />
                                 </div>
                             </div>
+                            {isEmployee && (
+                                <p className="text-[11px] text-slate-400">This task will be auto-assigned to you.</p>
+                            )}
                         </div>
 
                         <div className="space-y-1.5">
-                            <label className="text-[13px] font-semibold text-slate-700 flex items-center gap-2" htmlFor="due_date">
-                                Due Date
-                            </label>
+                            <label className="text-[13px] font-semibold text-slate-700" htmlFor="due_date">Due Date</label>
                             <div className="relative">
                                 <input
                                     id="due_date" name="due_date" type="date"
@@ -120,9 +134,7 @@ export default function NewTaskModal({ subordinates, onClose }: { subordinates: 
 
                     {/* Priority Selector */}
                     <div className="space-y-2.5">
-                        <label className="text-[13px] font-semibold text-slate-700 flex items-center gap-2">
-                            Priority
-                        </label>
+                        <label className="text-[13px] font-semibold text-slate-700">Priority</label>
                         <div className="flex bg-slate-100/50 p-1 rounded-xl gap-1">
                             {priorities.map((p) => (
                                 <button
@@ -158,9 +170,9 @@ export default function NewTaskModal({ subordinates, onClose }: { subordinates: 
                             {isSubmitting ? (
                                 <>
                                     <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-                                    Creating...
+                                    Saving...
                                 </>
-                            ) : 'Create Task'}
+                            ) : isEmployee ? 'Log Task' : 'Create Task'}
                         </button>
                     </div>
                 </form>

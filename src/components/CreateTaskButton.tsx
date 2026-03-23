@@ -8,9 +8,10 @@ type User = {
     full_name: string
     role: string
     department: string | null
+    display_name: string
 }
 
-export default function CreateTaskButton({ subordinates }: { subordinates: User[] }) {
+export default function CreateTaskButton({ subordinates, isEmployee = false }: { subordinates: User[], isEmployee?: boolean }) {
     const [isOpen, setIsOpen] = useState(false)
 
     return (
@@ -20,7 +21,7 @@ export default function CreateTaskButton({ subordinates }: { subordinates: User[
             </button>
 
             {isOpen && (
-                <NewTaskModal subordinates={subordinates} onClose={() => setIsOpen(false)} />
+                <NewTaskModal subordinates={subordinates} onClose={() => setIsOpen(false)} isEmployee={isEmployee} />
             )}
         </>
     )

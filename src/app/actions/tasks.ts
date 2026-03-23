@@ -25,9 +25,34 @@ export async function createTask(formData: FormData) {
     const priority = formData.get('priority') as string
     const due_date = formData.get('due_date') as string
     const assignee_id = formData.get('assignee_id') as string
+    const given_by_id = formData.get('given_by_id') as string // Employee self-task: manager who gave the task
+    const is_self_task = formData.get('is_self_task') === 'true'
 
     const due_date_iso = due_date ? new Date(due_date).toISOString() : null
     const reminder_schedule = due_date_iso ? calculateReminderSchedule(due_date_iso) : null
+
+    let finalAssigneeId = assignee_id || user.id
+    let initialStatus = 'Pending Acceptance'
+
+    if (is_self_task) {
+        // EMPLOYEE SELF-TASK FLOW:
+        // Employee is BOTH creator and assignee — task immediately active
+        finalAssigneeId = user.id
+        initialStatus = 'Not Started'
+    } else if (finalAssigneeId === user.id) {
+        initialStatus = 'Not Started'
+    } else {
+        // Check if assigning upward to a manager — auto-accept
+        const { data: assigneeProfile } = await supabase
+            .from('users')
+            .select('role')
+            .eq('id', finalAssigneeId)
+            .single()
+        
+        if (assigneeProfile && ['Manager', 'Founder', 'Admin'].includes(assigneeProfile.role)) {
+            initialStatus = 'Not Started'
+        }
+    }
 
     const { data: newTask, error } = await supabase
         .from('tasks')
@@ -37,10 +62,10 @@ export async function createTask(formData: FormData) {
             priority,
             due_date: due_date_iso,
             reminder_schedule,
-            assignee_id,
-            creator_id: user.id,
+            assignee_id: finalAssigneeId,
+            creator_id: user.id, // Always the actual person who created the task
             org_id: profile.org_id,
-            status: assignee_id === user.id ? 'Not Started' : 'Pending Acceptance'
+            status: initialStatus
         }])
         .select('id')
         .single()
@@ -50,12 +75,30 @@ export async function createTask(formData: FormData) {
         return { error: error.message }
     }
 
-    // Fire n8n notification to assignee
-    if (assignee_id && newTask) {
+    // For employee self-tasks: notify the manager who gave the task (if selected)
+    if (is_self_task && given_by_id && newTask) {
+        const { data: manager } = await supabase
+            .from('users')
+            .select('id, full_name, email, whatsapp_no')
+            .eq('id', given_by_id)
+            .single()
+
+        if (manager) {
+            await sendNotification({
+                type: 'task_created',
+                task: { id: newTask.id, title, description, priority, due_date },
+                recipient: manager,
+                sender: { id: user.id, full_name: profile.full_name, email: profile.email },
+            })
+        }
+    }
+
+    // For standard flow: notify the assignee (skip if self-assign)
+    if (!is_self_task && finalAssigneeId && newTask && finalAssigneeId !== user.id) {
         const { data: assignee } = await supabase
             .from('users')
             .select('id, full_name, email, whatsapp_no')
-            .eq('id', assignee_id)
+            .eq('id', finalAssigneeId)
             .single()
 
         if (assignee) {
