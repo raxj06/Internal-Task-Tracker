@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Plus, X } from 'lucide-react'
 import { updateOrgDepartments } from '@/app/actions/org'
 
@@ -8,9 +8,10 @@ export default function DepartmentManager({ orgId, initialDepartments }: { orgId
     const [departments, setDepartments] = useState<string[]>(initialDepartments)
     const [newDept, setNewDept] = useState('')
     const [isSaving, setIsSaving] = useState(false)
+    const isSavingRef = useRef(false)
 
     async function handleAdd() {
-        if (!newDept.trim()) return
+        if (!newDept.trim() || isSavingRef.current) return
         if (departments.includes(newDept.trim())) return
         
         const updated = [...departments, newDept.trim()]
@@ -20,15 +21,22 @@ export default function DepartmentManager({ orgId, initialDepartments }: { orgId
     }
 
     async function handleRemove(name: string) {
+        if (isSavingRef.current) return
         const updated = departments.filter(d => d !== name)
         setDepartments(updated)
         await save(updated)
     }
 
     async function save(list: string[]) {
+        if (isSavingRef.current) return
+        isSavingRef.current = true
         setIsSaving(true)
-        await updateOrgDepartments(orgId, list)
-        setIsSaving(false)
+        try {
+            await updateOrgDepartments(orgId, list)
+        } finally {
+            isSavingRef.current = false
+            setIsSaving(false)
+        }
     }
 
     return (

@@ -1,20 +1,28 @@
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 export default function GoogleButton({ text = 'Continue with Google' }: { text?: string }) {
     const [isLoading, setIsLoading] = useState(false)
+    const isLoadingRef = useRef(false)
 
     const handleGoogleLogin = async () => {
+        if (isLoadingRef.current) return
+        isLoadingRef.current = true
         setIsLoading(true)
-        const supabase = createClient()
-        await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: `${window.location.origin}/auth/callback`,
-            },
-        })
+        try {
+            const supabase = createClient()
+            await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    redirectTo: `${window.location.origin}/auth/callback`,
+                },
+            })
+        } catch {
+            isLoadingRef.current = false
+            setIsLoading(false)
+        }
     }
 
     return (

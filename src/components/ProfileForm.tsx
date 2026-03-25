@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { updateOwnProfile } from '@/app/actions/org'
 import { User, Phone, Mail, Loader2, CheckCircle2 } from 'lucide-react'
 
@@ -15,25 +15,32 @@ type Profile = {
 
 export default function ProfileForm({ profile }: { profile: Profile }) {
     const [isSaving, setIsSaving] = useState(false)
+    const isSavingRef = useRef(false)
     const [message, setMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null)
 
     async function handleSubmit(formData: FormData) {
+        if (isSavingRef.current) return
+        isSavingRef.current = true
         setIsSaving(true)
         setMessage(null)
         
-        const full_name = formData.get('full_name') as string
-        const whatsapp_no = formData.get('whatsapp_no') as string
-        
-        const res = await updateOwnProfile({ 
-            full_name, 
-            whatsapp_no: whatsapp_no || null 
-        })
+        try {
+            const full_name = formData.get('full_name') as string
+            const whatsapp_no = formData.get('whatsapp_no') as string
 
-        setIsSaving(false)
-        if (res.success) {
-            setMessage({ text: 'Profile updated successfully!', type: 'success' })
-        } else {
-            setMessage({ text: res.error || 'Failed to update profile', type: 'error' })
+            const res = await updateOwnProfile({
+                full_name,
+                whatsapp_no: whatsapp_no || null
+            })
+
+            if (res.success) {
+                setMessage({ text: 'Profile updated successfully!', type: 'success' })
+            } else {
+                setMessage({ text: res.error || 'Failed to update profile', type: 'error' })
+            }
+        } finally {
+            isSavingRef.current = false
+            setIsSaving(false)
         }
     }
 

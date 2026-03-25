@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useTransition } from 'react'
+import { useState, useEffect, useRef, useTransition, useCallback } from 'react'
 import { addComment, getComments, updateTaskStatus, respondToTask } from '@/app/actions/tasks'
 import { X, Send, Calendar, User, Info, MessageSquare, AlignLeft } from 'lucide-react'
 
@@ -41,6 +41,16 @@ export default function TaskDetailModal({
     const [showRejectionForm, setShowRejectionForm] = useState(false)
     const [isPending, startTransition] = useTransition()
     const [isLoadingComments, setIsLoadingComments] = useState(false)
+    const isCommentingRef = useRef(false)
+    const isUpdatingRef = useRef(false)
+    const isRespondingRef = useRef(false)
+
+    const loadComments = useCallback(async () => {
+        setIsLoadingComments(true)
+        const data = await getComments(task.id)
+        setComments(data as unknown as Comment[])
+        setIsLoadingComments(false)
+    }, [task.id])
 
     useEffect(() => {
         if (isOpen) {
@@ -48,35 +58,46 @@ export default function TaskDetailModal({
             setShowRejectionForm(false)
             setRejectionReason('')
         }
-    }, [isOpen, task.id])
-
-    async function loadComments() {
-        setIsLoadingComments(true)
-        const data = await getComments(task.id)
-        setComments(data as unknown as Comment[])
-        setIsLoadingComments(false)
-    }
+    }, [isOpen, loadComments])
 
     function handleAddComment() {
         if (!newComment.trim()) return
+        if (isCommentingRef.current) return
+        isCommentingRef.current = true
         startTransition(async () => {
-            await addComment(task.id, newComment.trim())
-            setNewComment('')
-            await loadComments()
+            try {
+                await addComment(task.id, newComment.trim())
+                setNewComment('')
+                await loadComments()
+            } finally {
+                isCommentingRef.current = false
+            }
         })
     }
 
     function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
+        if (isUpdatingRef.current) return
+        isUpdatingRef.current = true
         startTransition(async () => {
-            await updateTaskStatus(task.id, e.target.value)
+            try {
+                await updateTaskStatus(task.id, e.target.value)
+            } finally {
+                isUpdatingRef.current = false
+            }
         })
     }
 
     function handleResponse(accept: boolean) {
         if (!accept && !rejectionReason.trim()) return
+        if (isRespondingRef.current) return
+        isRespondingRef.current = true
         startTransition(async () => {
-            await respondToTask(task.id, accept, rejectionReason.trim() || undefined)
-            if (accept) onClose()
+            try {
+                await respondToTask(task.id, accept, rejectionReason.trim() || undefined)
+                if (accept) onClose()
+            } finally {
+                isRespondingRef.current = false
+            }
         })
     }
 

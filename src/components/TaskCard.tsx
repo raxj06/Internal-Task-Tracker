@@ -1,7 +1,7 @@
 'use client'
 
 import { updateTaskStatus, respondToTask } from '@/app/actions/tasks'
-import { useState, useTransition } from 'react'
+import { useState, useRef, useTransition } from 'react'
 import TaskDetailModal from './TaskDetailModal'
 
 type Task = {
@@ -20,10 +20,12 @@ type Task = {
 
 export default function TaskCard({ task, isAssignee = false }: { task: Task, isAssignee?: boolean }) {
     const [isUpdating, setIsUpdating] = useState(false)
+    const isUpdatingRef = useRef(false)
     const [isDetailOpen, setIsDetailOpen] = useState(false)
     const [showRejectionForm, setShowRejectionForm] = useState(false)
     const [rejectionReason, setRejectionReason] = useState('')
     const [isPending, startTransition] = useTransition()
+    const isRespondingRef = useRef(false)
 
     const priorityColors: Record<string, string> = {
         'High': 'bg-red-50 text-red-600 border-red-100',
@@ -41,17 +43,29 @@ export default function TaskCard({ task, isAssignee = false }: { task: Task, isA
     }
 
     async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
+        if (isUpdatingRef.current) return
+        isUpdatingRef.current = true
         setIsUpdating(true)
-        await updateTaskStatus(task.id, e.target.value)
-        setIsUpdating(false)
+        try {
+            await updateTaskStatus(task.id, e.target.value)
+        } finally {
+            isUpdatingRef.current = false
+            setIsUpdating(false)
+        }
     }
 
     function handleResponse(accept: boolean) {
         if (!accept && !rejectionReason.trim()) return
+        if (isRespondingRef.current) return
+        isRespondingRef.current = true
         startTransition(async () => {
-            await respondToTask(task.id, accept, rejectionReason.trim() || undefined)
-            setShowRejectionForm(false)
-            setRejectionReason('')
+            try {
+                await respondToTask(task.id, accept, rejectionReason.trim() || undefined)
+                setShowRejectionForm(false)
+                setRejectionReason('')
+            } finally {
+                isRespondingRef.current = false
+            }
         })
     }
 
