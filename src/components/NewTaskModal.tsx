@@ -1,7 +1,7 @@
 'use client'
 import { createTask } from '@/app/actions/tasks'
 import { useState, useRef } from 'react'
-import { X, Calendar, User, AlignLeft, Flag } from 'lucide-react'
+import { X, Calendar, User } from 'lucide-react'
 
 type UserProfile = {
     id: string
@@ -21,18 +21,26 @@ export default function NewTaskModal({
     isEmployee?: boolean
 }) {
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const isSubmittingRef = useRef(false)
     const [selectedPriority, setSelectedPriority] = useState('Medium')
     const formRef = useRef<HTMLFormElement>(null)
 
     async function handleSubmit(formData: FormData) {
+        if (isSubmittingRef.current) return
+        isSubmittingRef.current = true
         setIsSubmitting(true)
-        formData.set('priority', selectedPriority)
-        if (isEmployee) {
-            formData.set('is_self_task', 'true')
+
+        try {
+            formData.set('priority', selectedPriority)
+            if (isEmployee) {
+                formData.set('is_self_task', 'true')
+            }
+            await createTask(formData)
+            onClose()
+        } finally {
+            isSubmittingRef.current = false
+            setIsSubmitting(false)
         }
-        await createTask(formData)
-        setIsSubmitting(false)
-        onClose()
     }
 
     const priorities = [
